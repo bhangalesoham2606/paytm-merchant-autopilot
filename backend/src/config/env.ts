@@ -4,7 +4,10 @@ import { z } from 'zod';
 dotenv.config();
 
 const envSchema = z.object({
-  PORT: z.string().default('4000').transform((val) => parseInt(val, 10)),
+  PORT: z
+    .union([z.string(), z.number()])
+    .default('4000')
+    .transform((val) => (typeof val === 'number' ? val : parseInt(val, 10))),
   MONGODB_URI: z.string().default('mongodb://localhost:27017/paytm_autopilot'),
   CORS_ORIGIN: z.string().default('*'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

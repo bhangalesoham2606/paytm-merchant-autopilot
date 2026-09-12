@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: paytm-merchant-autopilot-backend
+    runtime: docker
+    dockerfilePath: Dockerfile
+    dockerContext: backend
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: MONGODB_URI
+        sync: false # Enter MongoDB Atlas URI in dashboard
