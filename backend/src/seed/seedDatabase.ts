@@ -29,6 +29,23 @@ function randChoice<T>(arr: T[]): T {
   return arr[Math.floor(random() * arr.length)];
 }
 
+function generateExactAmounts(count: number, targetSum: number, minVal: number, maxVal: number): number[] {
+  const result: number[] = [];
+  const base = Math.floor(targetSum / count);
+  const remainder = targetSum - base * count;
+  for (let i = 0; i < count; i++) {
+    result.push(base + (i < remainder ? 1 : 0));
+  }
+  for (let i = 0; i < count - 1; i += 2) {
+    const delta = randInt(10, 45);
+    if (result[i] + delta <= maxVal && result[i + 1] - delta >= minVal) {
+      result[i] += delta;
+      result[i + 1] -= delta;
+    }
+  }
+  return result;
+}
+
 const PAYMENT_METHODS = ['UPI', 'UPI', 'UPI', 'CARD', 'NET_BANKING', 'WALLET'];
 
 export async function seedDatabase(shouldDisconnect = true) {
@@ -137,8 +154,10 @@ export async function seedDatabase(shouldDisconnect = true) {
   // ==========================================
   // 3. Generate 10,000+ Transactions over 90 Days
   // ==========================================
-  // Day 0 = 2026-06-15, Day 89 = 2026-09-12 (Today)
-  const baseDate = new Date('2026-06-15T00:00:00.000Z'); // UTC base
+  // Day 0 = 2026-06-15, Day 89 = 2026-09-12 (Today) in Asia/Kolkata (+05:30)
+  const offsetMs = 330 * 60 * 1000;
+  const todayMidnightIst = Date.UTC(2026, 8, 12, 0, 0, 0) - offsetMs;
+  const baseDate = new Date(todayMidnightIst - 89 * 24 * 3600 * 1000);
   const transactions: any[] = [];
   let txnCounter = 100000;
 
@@ -159,57 +178,36 @@ export async function seedDatabase(shouldDisconnect = true) {
     // ----------------------------------------
     // M001: Rajesh Bakery (Normal steady bakery)
     // ----------------------------------------
-    let m1TxnCount = randInt(65, 85);
-    if (isWeekend) m1TxnCount = Math.floor(m1TxnCount * 1.25);
-    if (isScenarioF) m1TxnCount = 16; // Severe drop on 2026-09-10
+    if (isToday) {
+      // Milestone benchmark:
+      // successfulRevenue: 24860, successfulTransactions: 187, ATV: 132.94, failedTransactions: 9, refundAmount: 450, rate: 95.4%
+      const successAmounts = generateExactAmounts(187, 24860, 55, 230);
+      for (let i = 0; i < successAmounts.length; i++) {
+        txnCounter++;
+        const customerId = randChoice(m1CustomerIds);
+        const amount = successAmounts[i];
+        const hour = randInt(7, 21);
+        const minute = randInt(0, 59);
+        const second = randInt(0, 59);
+        const timestamp = new Date(currentDayDate.getTime() + (hour * 3600 + minute * 60 + second) * 1000);
 
-    for (let i = 0; i < m1TxnCount; i++) {
-      txnCounter++;
-      const customerId = randChoice(m1CustomerIds);
-      const amount = randInt(50, 450); // Bakery basket size
-      const hour = randInt(7, 21);
-      const minute = randInt(0, 59);
-      const second = randInt(0, 59);
-      const timestamp = new Date(currentDayDate.getTime() + (hour * 3600 + minute * 60 + second) * 1000);
+        let refundAmount = 0;
+        if (i === 10) refundAmount = 250;
+        if (i === 20) refundAmount = 200;
 
-      // Status determination
-      let status: TransactionStatus = 'SUCCESS';
-      let refundAmount = 0;
+        transactions.push({
+          transactionId: `TXN${txnCounter}`,
+          merchantId: 'M001',
+          customerId,
+          amount,
+          timestamp,
+          status: 'SUCCESS',
+          paymentMethod: randChoice(PAYMENT_METHODS),
+          refundAmount,
+          orderId: `ORD_${txnCounter}`,
+          createdAt: timestamp,
+        });
 
-      if (isScenarioC) {
-        // Refund spike on 2026-09-08 (30% refunded)
-        const roll = random();
-        if (roll < 0.30) {
-          status = 'REFUNDED';
-          refundAmount = amount;
-        } else if (roll < 0.35) {
-          status = 'FAILED';
-        }
-      } else {
-        const roll = random();
-        if (roll < 0.93) status = 'SUCCESS';
-        else if (roll < 0.96) status = 'FAILED';
-        else if (roll < 0.98) status = 'PENDING';
-        else {
-          status = 'REFUNDED';
-          refundAmount = amount;
-        }
-      }
-
-      transactions.push({
-        transactionId: `TXN${txnCounter}`,
-        merchantId: 'M001',
-        customerId,
-        amount,
-        timestamp,
-        status,
-        paymentMethod: randChoice(PAYMENT_METHODS),
-        refundAmount,
-        orderId: `ORD_${txnCounter}`,
-        createdAt: timestamp,
-      });
-
-      if (status === 'SUCCESS') {
         const existing = customerStats.get(customerId) || {
           totalSpend: 0,
           count: 0,
@@ -221,6 +219,155 @@ export async function seedDatabase(shouldDisconnect = true) {
         if (timestamp < existing.firstPurchase) existing.firstPurchase = timestamp;
         if (timestamp > existing.lastPurchase) existing.lastPurchase = timestamp;
         customerStats.set(customerId, existing);
+      }
+
+      // Exactly 9 failed transactions
+      for (let i = 0; i < 9; i++) {
+        txnCounter++;
+        const customerId = randChoice(m1CustomerIds);
+        const amount = randInt(60, 200);
+        const hour = randInt(7, 21);
+        const minute = randInt(0, 59);
+        const second = randInt(0, 59);
+        const timestamp = new Date(currentDayDate.getTime() + (hour * 3600 + minute * 60 + second) * 1000);
+
+        transactions.push({
+          transactionId: `TXN${txnCounter}`,
+          merchantId: 'M001',
+          customerId,
+          amount,
+          timestamp,
+          status: 'FAILED',
+          paymentMethod: randChoice(PAYMENT_METHODS),
+          refundAmount: 0,
+          orderId: `ORD_${txnCounter}`,
+          createdAt: timestamp,
+        });
+      }
+    } else if (day === 88) {
+      // Yesterday (2026-09-11): Calibrated to 22117 so growth = +12.4% above baseline
+      const yesterdayAmounts = generateExactAmounts(165, 22117, 50, 230);
+      for (let i = 0; i < yesterdayAmounts.length; i++) {
+        txnCounter++;
+        const customerId = randChoice(m1CustomerIds);
+        const amount = yesterdayAmounts[i];
+        const hour = randInt(7, 21);
+        const minute = randInt(0, 59);
+        const second = randInt(0, 59);
+        const timestamp = new Date(currentDayDate.getTime() + (hour * 3600 + minute * 60 + second) * 1000);
+
+        transactions.push({
+          transactionId: `TXN${txnCounter}`,
+          merchantId: 'M001',
+          customerId,
+          amount,
+          timestamp,
+          status: 'SUCCESS',
+          paymentMethod: randChoice(PAYMENT_METHODS),
+          refundAmount: 0,
+          orderId: `ORD_${txnCounter}`,
+          createdAt: timestamp,
+        });
+
+        const existing = customerStats.get(customerId) || {
+          totalSpend: 0,
+          count: 0,
+          firstPurchase: timestamp,
+          lastPurchase: timestamp,
+        };
+        existing.totalSpend += amount;
+        existing.count += 1;
+        if (timestamp < existing.firstPurchase) existing.firstPurchase = timestamp;
+        if (timestamp > existing.lastPurchase) existing.lastPurchase = timestamp;
+        customerStats.set(customerId, existing);
+      }
+
+      for (let i = 0; i < 7; i++) {
+        txnCounter++;
+        const customerId = randChoice(m1CustomerIds);
+        const amount = randInt(60, 200);
+        const hour = randInt(7, 21);
+        const minute = randInt(0, 59);
+        const second = randInt(0, 59);
+        const timestamp = new Date(currentDayDate.getTime() + (hour * 3600 + minute * 60 + second) * 1000);
+
+        transactions.push({
+          transactionId: `TXN${txnCounter}`,
+          merchantId: 'M001',
+          customerId,
+          amount,
+          timestamp,
+          status: 'FAILED',
+          paymentMethod: randChoice(PAYMENT_METHODS),
+          refundAmount: 0,
+          orderId: `ORD_${txnCounter}`,
+          createdAt: timestamp,
+        });
+      }
+    } else {
+      let m1TxnCount = randInt(65, 85);
+      if (isWeekend) m1TxnCount = Math.floor(m1TxnCount * 1.25);
+      if (isScenarioF) m1TxnCount = 16; // Severe drop on 2026-09-10
+
+      for (let i = 0; i < m1TxnCount; i++) {
+        txnCounter++;
+        const customerId = randChoice(m1CustomerIds);
+        const amount = randInt(50, 450); // Bakery basket size
+        const hour = randInt(7, 21);
+        const minute = randInt(0, 59);
+        const second = randInt(0, 59);
+        const timestamp = new Date(currentDayDate.getTime() + (hour * 3600 + minute * 60 + second) * 1000);
+
+        // Status determination
+        let status: TransactionStatus = 'SUCCESS';
+        let refundAmount = 0;
+
+        if (isScenarioC) {
+          // Refund spike on 2026-09-08 (30% refunded)
+          const roll = random();
+          if (roll < 0.3) {
+            status = 'REFUNDED';
+            refundAmount = amount;
+          } else if (roll < 0.35) {
+            status = 'FAILED';
+          }
+        } else {
+          const roll = random();
+          if (roll < 0.93) status = 'SUCCESS';
+          else if (roll < 0.96) status = 'FAILED';
+          else if (roll < 0.98) status = 'PENDING';
+          else {
+            status = 'REFUNDED';
+            refundAmount = amount;
+          }
+        }
+
+        transactions.push({
+          transactionId: `TXN${txnCounter}`,
+          merchantId: 'M001',
+          customerId,
+          amount,
+          timestamp,
+          status,
+          paymentMethod: randChoice(PAYMENT_METHODS),
+          refundAmount,
+          orderId: `ORD_${txnCounter}`,
+          createdAt: timestamp,
+        });
+
+        if (status === 'SUCCESS') {
+          const existing = customerStats.get(customerId) || {
+            totalSpend: 0,
+            count: 0,
+            firstPurchase: timestamp,
+            lastPurchase: timestamp,
+          };
+          existing.totalSpend += amount;
+          existing.count += 1;
+          if (timestamp < existing.firstPurchase) existing.firstPurchase = timestamp;
+          if (timestamp > existing.lastPurchase) existing.lastPurchase = timestamp;
+          customerStats.set(customerId, existing);
+        }
       }
     }
 
